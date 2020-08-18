@@ -147,17 +147,18 @@ public:
 						}
 					}
 					if (valid) {
-						for (auto& client_ : clients_) {
-							if (client_.get_id() == sender) {
-								printw("Client %u has changed their name to %s.\n", sender, name);
-								std::stringstream ss;
-								ss << "server: " << client_.get_name() << " has changed their name to " << name << ".";
-								const std::string& tmp = ss.str();
-								const char* reply = tmp.c_str();
-								client_.set_name(name, name_length);
-								server_.send_to_all(reply, tmp.length());
-								break;
-							}
+						client* client_ptr = find_client(sender);
+						if (!client_ptr) {
+							printw("Client %u attempted to change their name, but they could not be found \
+									in the list of clients.\n", sender);
+						} else {
+							printw("Client %u has changed their name to %s.\n", sender, name);
+							std::stringstream ss;
+							ss << "server: " << client_ptr->get_name() << " has changed their name to " << name << ".";
+							const std::string& tmp = ss.str();
+							const char* reply = tmp.c_str();
+							client_ptr->set_name(name, name_length);
+							server_.send_to_all(reply, tmp.length());
 						}
 					}
 				}
@@ -187,16 +188,17 @@ public:
 						if (!strcmp(name, client_.get_name())) {
 							// found client so let's send them the message
 							// first, we need to get the name of the sender
-							for (auto& client2_ : clients_) {
-								if (client2_.get_id() == sender) {
-									std::stringstream ss;
-									ss << client2_.get_name() << " (to " << client_.get_name() << "): " << body+name_end+1;
-									const std::string& tmp = ss.str();
-									const char* reply = tmp.c_str();
-									server_.send_to(client_.get_id(), reply, tmp.length());
-									server_.send_to(sender, reply, tmp.length());
-									break;
-								}
+							client* client_ptr = find_client(sender);
+							if (!client_ptr) {
+								printw("Client %u attempted to send a message, but they could not be found \
+									in the list of clients.\n", sender);
+							} else {
+								std::stringstream ss;
+								ss << client_ptr->get_name() << " (to " << client_.get_name() << "): " << body+name_end+1;
+								const std::string& tmp = ss.str();
+								const char* reply = tmp.c_str();
+								server_.send_to(client_.get_id(), reply, tmp.length());
+								server_.send_to(sender, reply, tmp.length());
 							}
 							found = true;
 							break;
@@ -223,29 +225,45 @@ public:
 			}
 			return;
 		}
-		for (auto& client_ : clients_) {
-			if (client_.get_id() == sender) {
-				std::size_t sender_name_len = strlen(client_.get_name());
-				std::size_t new_message_length = sender_name_len + length + 3;
-				char new_message[new_message_length];
-				
-				sprintf(new_message, "%s: ", client_.get_name());
-				memcpy(new_message + sender_name_len + 2, body, length);
-				new_message[new_message_length - 1] = '\0';
-				
-				attron(A_BOLD);
-				for (int i = 0; i < new_message_length-1; i++) {
-					if (new_message[i] == ':') attroff(A_BOLD);
-					addch(new_message[i]);
-				}
-				addch('\n');
-				refresh();
-				
-				server_.send_to_all(new_message, new_message_length-1);
+		client* client_ptr = find_client(sender);
+		if (!client_ptr) {
+			printw("Client %u attempted to send a message, but they could not be found \
+						in the list of clients.\n", sender);
+		} else {
+			std::size_t sender_name_len = strlen(client_ptr->get_name());
+			std::size_t new_message_length = sender_name_len + length + 3;
+			char new_message[new_message_length];
+			
+			sprintf(new_message, "%s: ", client_ptr->get_name());
+			memcpy(new_message + sender_name_len + 2, body, length);
+			new_message[new_message_length - 1] = '\0';
+			
+			attron(A_BOLD);
+			for (int i = 0; i < new_message_length-1; i++) {
+				if (new_message[i] == ':') attroff(A_BOLD);
+				addch(new_message[i]);
 			}
+			addch('\n');
+			refresh();
+			
+			server_.send_to_all(new_message, new_message_length-1);
 		}
 	}
 private:
+	client* find_client(std::size_t id) {
+		// clients_ list is always guaranteed to be sorted according to id
+		auto iterator = std::lower_bound(clients_.begin(), clients_.end(), id,
+		  [](const client& c1, const std::size_t& id) {
+			return c1.get_id() < id;
+		});
+		
+		if (iterator == clients_.end()) {
+			return nullptr;
+		}
+		
+		return &(*iterator);
+	}
+
 	net_server server_;
 	std::list<client> clients_;
 	std::mutex clients_mutex_;
