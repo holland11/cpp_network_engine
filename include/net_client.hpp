@@ -71,16 +71,47 @@ private:
 
 */
 
+class net_client;
+
+class application_client {
+	// base class to be inherited by any applications that want
+	// to use the net_client class
+public:
+	application_client(std::string& ip, std::size_t port)
+	  : client_ptr_(std::make_shared<net_client>(io_context_, ip, port,
+	      std::bind(&application_client::read_handler, this, std::placeholders::_1, std::placeholders::_2))) {
+	}
+	
+	void start() {
+		io_thread_ptr_ = std::make_shared<std::thread>([this]() { io_context_.run(); });
+	}
+	
+	void stop() {
+		io_context_.stop();
+	}
+	
+private:
+	virtual void read_handler(char* body, std::size_t length) {
+		// virtual so that when we pass this function to the net_client constructor,
+		// it passes the derived version rather than this one
+		std::cout << "You need to implement your own version of read_handler." << std::endl;
+	}
+protected:
+	std::shared_ptr<std::thread> io_thread_ptr_;
+	boost::asio::io_context io_context_;
+	std::shared_ptr<net_client> client_ptr_;
+};
+
 class net_client {
 public:
-	net_client(boost::asio::io_context& io_context, std::size_t port,
+	net_client(boost::asio::io_context& io_context, std::string& ip, std::size_t port,
 	           std::function<void (char*, std::size_t)> read_handler);
 			   
 	void send(const char* body, std::size_t length);
 			   
 	std::size_t get_max_body_length();
 private:
-	void connect(std::size_t port);
+	void connect(std::string& ip, std::size_t port);
 	void read_header();
 	void handle_read_header(const boost::system::error_code e, std::size_t bytes_transferred);
 	void read_body();

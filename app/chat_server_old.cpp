@@ -63,13 +63,14 @@ private:
 	bool valid_;
 };
 
-class chat_server : public application_server {
+class chat_server {
 public:
-	chat_server(std::size_t port)
-	  : application_server(port)
+	chat_server(boost::asio::io_context& io_context, std::size_t port)
+	  : server_(io_context, port, std::bind(&chat_server::handle_accept, this, std::placeholders::_1, std::placeholders::_2),
+	    std::bind(&chat_server::handle_read, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3))
 	{}
 	
-	void accept_handler(std::size_t client_id, bool connect) {
+	void handle_accept(std::size_t client_id, bool connect) {
 		std::scoped_lock lock(clients_mutex_);
 		if (connect) {
 			clients_.emplace_back(client_id);
@@ -78,7 +79,7 @@ public:
 			ss << "server: " << "New client connected with id " << client_id << ".";
 			const std::string& tmp = ss.str();
 			const char* reply = tmp.c_str();
-			server_ptr_->send_to_all_except(client_id, reply, tmp.length());
+			server_.send_to_all_except(client_id, reply, tmp.length());
 			refresh();
 		} else {
 			clients_.remove_if([this,client_id](const client &client_){ 
@@ -89,7 +90,7 @@ public:
 					ss << "server: " << client_.get_name() << " has disconnected.";
 					const std::string& tmp = ss.str();
 					const char* reply = tmp.c_str();
-					server_ptr_->send_to_all(reply, tmp.length());
+					server_.send_to_all(reply, tmp.length());
 					return true;
 				} else {
 					return false;
@@ -99,7 +100,7 @@ public:
 		//std::cout << "New client with id: " << client_id << std::endl;
 	}
 	
-	void read_handler(std::size_t sender, char* body, std::size_t length) {
+	void handle_read(std::size_t sender, char* body, std::size_t length) {
 		// whenever the server receives a message, this function will be called
 		// where clients[sender] will be the connection that sent the message
 		// body will be a pointer to the start of the body of the message
@@ -117,21 +118,21 @@ public:
 				if (name_length == 0) {
 					printw("Client %u attempted to change their name to an empty string which is not allowed.\n", sender);
 					char reply[] = "server: Cannot change your name to the empty string";
-					server_ptr_->send_to(sender, reply, strlen(reply));
+					server_.send_to(sender, reply, strlen(reply));
 				} else if (name_length > MAX_NAME_LENGTH) {
 					printw("Client %u attempted to change their name to a name that is too long.\n", sender);
 					std::stringstream ss;
 					ss << "server: Name cannot exceed " << MAX_NAME_LENGTH << " characters.";
 					const std::string& tmp = ss.str();
 					const char* reply = tmp.c_str();
-					server_ptr_->send_to(sender, reply, tmp.length());
+					server_.send_to(sender, reply, tmp.length());
 				} else {
 					bool valid = true;
 					for (int i = 0; i < name_length; i++) {
 						if (!isalpha(name[i]) && !isdigit(name[i])) {
 							printw("Client %u attempted to change their name to a name with at least one non-alphanumeric character.\n", sender);
 							char reply[] = "server: Names can only contain letters and numbers.";
-							server_ptr_->send_to(sender, reply, strlen(reply));
+							server_.send_to(sender, reply, strlen(reply));
 							valid = false;
 							break;
 						}
@@ -140,7 +141,7 @@ public:
 						if (!strcmp(name, client_.get_name())) {
 							printw("Client %u attempted to change their name to a name already in use by client %u.\n", sender, client_.get_id());
 							char reply[] = "server: Name change declined due to name already in use.";
-							server_ptr_->send_to(sender, reply, strlen(reply));
+							server_.send_to(sender, reply, strlen(reply));
 							valid = false;
 							break;
 						}
@@ -157,7 +158,7 @@ public:
 							const std::string& tmp = ss.str();
 							const char* reply = tmp.c_str();
 							client_ptr->set_name(name, name_length);
-							server_ptr_->send_to_all(reply, tmp.length());
+							server_.send_to_all(reply, tmp.length());
 						}
 					}
 				}
@@ -175,7 +176,7 @@ public:
 				if (name_end == length || name_start+1 == name_end) {
 					printw("Client %u attempted to send a message, but didn't use the command properly.\n", sender);
 					char reply[] = "server: Command not executed properly. Must be #msg <target-name> <message>.";
-					server_ptr_->send_to(sender, reply, strlen(reply));
+					server_.send_to(sender, reply, strlen(reply));
 				} else {
 					std::size_t name_length = name_end - name_start;
 					char name[name_length+1];
@@ -196,8 +197,8 @@ public:
 								ss << client_ptr->get_name() << " (to " << client_.get_name() << "): " << body+name_end+1;
 								const std::string& tmp = ss.str();
 								const char* reply = tmp.c_str();
-								server_ptr_->send_to(client_.get_id(), reply, tmp.length());
-								server_ptr_->send_to(sender, reply, tmp.length());
+								server_.send_to(client_.get_id(), reply, tmp.length());
+								server_.send_to(sender, reply, tmp.length());
 							}
 							found = true;
 							break;
@@ -207,7 +208,7 @@ public:
 						// unable to find a client with the name specified by the msg command
 						char reply[] = "server: Unable to find a client with the name you specified.";
 						printw("Unable to find a client with the name specified in the #msg command.\n");
-						server_ptr_->send_to(sender, reply, strlen(reply));
+						server_.send_to(sender, reply, strlen(reply));
 					}
 				}
 				refresh();
@@ -220,7 +221,7 @@ public:
 				}
 				const std::string& tmp = ss.str();
 				const char* reply = tmp.c_str();
-				server_ptr_->send_to(sender, reply, tmp.length());
+				server_.send_to(sender, reply, tmp.length());
 			}
 			return;
 		}
@@ -245,7 +246,7 @@ public:
 			addch('\n');
 			refresh();
 			
-			server_ptr_->send_to_all(new_message, new_message_length-1);
+			server_.send_to_all(new_message, new_message_length-1);
 		}
 	}
 private:
@@ -263,6 +264,7 @@ private:
 		return &(*iterator);
 	}
 
+	net_server server_;
 	std::list<client> clients_;
 	std::mutex clients_mutex_;
 };
@@ -271,8 +273,9 @@ int main() {
 	try {
 		initscr();
 		scrollok(stdscr, TRUE);
-		chat_server serv(1234);
-		serv.start();
+		boost::asio::io_context io_context;
+		chat_server serv(io_context, 1234);
+		io_context.run();
 	} catch (std::exception& e) {
 		std::cerr << e.what() << std::endl;
 		endwin();

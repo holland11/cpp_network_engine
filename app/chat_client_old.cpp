@@ -1,6 +1,7 @@
 #include "net_client.hpp"
 #include "chat_constants.hpp"
 
+#include <iostream>
 #include <cstring>
 #include <ncurses.h>
 
@@ -36,11 +37,12 @@ send a private message to another client, view the client list, and exit gracefu
 
 */
 
-class chat_client : public application_client {
+class chat_client {
 public:
-	chat_client(std::string& ip, std::size_t port) 
-	  : application_client(ip, port) {
-		max_body_length_ = client_ptr_->get_max_body_length() - MAX_NAME_LENGTH;
+	chat_client(boost::asio::io_context& io_context, std::size_t port) 
+	  : io_context_(io_context), client_(io_context, port,
+	      std::bind(&chat_client::handle_read, this, std::placeholders::_1, std::placeholders::_2)) {
+		max_body_length_ = client_.get_max_body_length() - MAX_NAME_LENGTH;
 		
 		std::size_t input_win_h = LINES / 8;
 		if (input_win_h < 3) input_win_h = 3;
@@ -65,9 +67,7 @@ public:
 	}
 	
 	void start() {
-		application_client::start();
 		write_loop();
-		io_thread_ptr_->join();
 	}
 	
 private:
@@ -84,23 +84,23 @@ private:
 				wrefresh(output_win);
 				wrefresh(input_win);
 			} else if (!strncmp(message, "#name ", 6)) {
-				client_ptr_->send(message, strlen(message));
+				client_.send(message, strlen(message));
 			} else if (!strncmp(message, "#msg ", 5)) {
 				// the message should be structured like
 				// #msg <client-name> <message>
-				client_ptr_->send(message, strlen(message));
+				client_.send(message, strlen(message));
 			} else if (!strcmp(message, "#exit")) {
 				wprintw(output_win, "Exiting.\n");
-				application_client::stop();
+				io_context_.stop();
 				return;
 			} else if (!strcmp(message, "#clients")) {
-				client_ptr_->send(message, strlen(message));
+				client_.send(message, strlen(message));
 			} else {
 				wprintw(output_win, "Command \"%s\" not recognized.\n", message);
 				wrefresh(output_win);
 			}
 		} else {
-			client_ptr_->send(message, strlen(message));
+			client_.send(message, strlen(message));
 		}
 		
 		write_loop();
@@ -157,7 +157,7 @@ private:
 		wrefresh(input_win);
 	}
 	
-	void read_handler(char* body, std::size_t length) {
+	void handle_read(char* body, std::size_t length) {
 		wattron(output_win, A_BOLD);
 		wattron(output_win, COLOR_PAIR(1));
 		for (int i = 0; i < length; i++) {
@@ -174,7 +174,9 @@ private:
 
 	WINDOW *output_win;
 	WINDOW *input_win;
+	net_client client_;
 	std::size_t max_body_length_;
+	boost::asio::io_context& io_context_;
 };
 
 int main() {
@@ -183,12 +185,14 @@ int main() {
 		start_color();
 		init_pair(1, COLOR_MAGENTA, COLOR_BLACK); // color for client names in chat
 		init_pair(2, COLOR_CYAN, COLOR_BLACK); // color for help message
+		boost::asio::io_context io_context;
 		{
-			std::string ip("127.0.0.1");
-			chat_client client(ip, 1234);
+			chat_client client(io_context, 1234);
 			
+			std::thread io_thread([&io_context](){ io_context.run(); });
 			client.start();
 			
+			io_thread.join();
 		} // so that the client destructor gets called once io_thread.join() returns
 		
 		endwin();

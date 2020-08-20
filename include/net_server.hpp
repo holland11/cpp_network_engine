@@ -64,6 +64,43 @@ and then it will be decoded by the receiver.
 
 using boost::asio::ip::tcp;
 
+class net_server;
+
+class application_server {
+	// a base class that applications should inherit from
+	// in order to use the net_server class as expected
+public:
+	application_server(std::size_t port) 
+	  : server_ptr_(std::make_shared<net_server>(io_context_, port, 
+		  std::bind(&application_server::accept_handler, this, std::placeholders::_1, std::placeholders::_2),
+	      std::bind(&application_server::read_handler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3))) {
+	}
+	void start() {
+		// if you are going to overwrite this function, 
+		// you should still call application_server::start() from inside
+		io_context_.run();
+	}
+	void stop() {
+		io_context_.stop();
+	}
+private:
+	virtual void accept_handler(std::size_t client_id, bool connect) {
+		// virtual so that when we pass this function to the net_server constructor,
+		// it passes the derived version rather than this one
+		std::cout << "You need to implement your own version of accept_handler." << std::endl;
+	}
+	
+	virtual void read_handler(std::size_t sender, char* body, std::size_t length) {
+		// virtual so that when we pass this function to the net_server constructor,
+		// it passes the derived version rather than this one
+		std::cout << "You need to implement your own version of read_handler." << std::endl;
+	}
+	
+protected:
+	boost::asio::io_context io_context_;
+	std::shared_ptr<net_server> server_ptr_;
+};
+
 class tcp_connection
   : public std::enable_shared_from_this<tcp_connection> {
 	// a class representing a client that has connected to the server

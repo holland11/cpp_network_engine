@@ -1,19 +1,19 @@
 #include "net_client.hpp"
 
 
-net_client::net_client(boost::asio::io_context& io_context, std::size_t port,
+net_client::net_client(boost::asio::io_context& io_context, std::string& ip, std::size_t port,
 	           std::function<void (char*, std::size_t)> read_handler) 
   : io_context_(io_context), socket_(io_context), read_handler_(read_handler) {
-	connect(port);
+	connect(ip, port);
 }
 
-void net_client::connect(std::size_t port) {
+void net_client::connect(std::string& ip, std::size_t port) {
 	// The first thing that we do after the constructor has initialized its members
 	// is connect to the server.
 	// As of now, only local network connections are supported so we will
 	// always connect to 127.0.0.1
 	// After connecting, we call read_header() to start the read loop.
-	socket_.connect(boost::asio::ip::tcp::endpoint(boost::asio::ip::address::from_string("127.0.0.1"), port));
+	socket_.connect(boost::asio::ip::tcp::endpoint(boost::asio::ip::address::from_string(ip), port));
 		
 	read_header();
 }
