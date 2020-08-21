@@ -192,14 +192,13 @@ private:
 	char turn;
 };
 
-class connect4_server {
+class connect4_server : public application_server {
 public:
-	connect4_server(boost::asio::io_context& io_context, std::size_t port)
-	  : server_(io_context, port, std::bind(&connect4_server::handle_accept, this, std::placeholders::_1, std::placeholders::_2),
-	    std::bind(&connect4_server::handle_read, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3))
+	connect4_server(std::size_t port)
+	  : application_server(port)
 	{}
 private:
-	void handle_accept(std::size_t client_id, bool connect) {
+	void accept_handler(std::size_t client_id, bool connect) {
 		if (connect) {
 			for (auto& player_ : players_) {
 				if (!player_.in_game) {
@@ -211,12 +210,12 @@ private:
 					new_player.in_game = true;
 					lock.unlock();
 					// let's creat a new game!
-					std::shared_ptr<game> new_game = std::make_shared<game>(&player_, &new_player, &server_);
+					std::shared_ptr<game> new_game = std::make_shared<game>(&player_, &new_player, &(*server_ptr_));
 					games_.push_back(new_game);
 					new_game->start();
 					char reply[] = "#msg s Your game has begun.";
-					server_.send_to(client_id, reply, strlen(reply));
-					server_.send_to(player_.get_id(), reply, strlen(reply));
+					server_ptr_->send_to(client_id, reply, strlen(reply));
+					server_ptr_->send_to(player_.get_id(), reply, strlen(reply));
 					printw("New client connected with id %u, starting a game with client %u.\n", client_id, player_.get_id());
 					refresh();
 					return;
@@ -228,7 +227,7 @@ private:
 			lock.unlock();
 			// no players available to start a new game so we wait
 			char reply[] = "#msg s No players available to start a new game. You will be put in a game when a new player joins.";
-			server_.send_to(client_id, reply, strlen(reply));
+			server_ptr_->send_to(client_id, reply, strlen(reply));
 			printw("New client connected with id %u, but no player available to start a new game.\n", client_id);
 			refresh();
 			return;
@@ -255,10 +254,10 @@ private:
 							if (other_player) {
 								other_player->in_game = false;
 								char reply1[] = "#endgame";
-								server_.send_to(other_player->get_id(), reply1, strlen(reply1));
+								server_ptr_->send_to(other_player->get_id(), reply1, strlen(reply1));
 								char reply2[] = "#msg s Your opponent has disconnected so you have been put back in "
 												"queue to wait for a new opponent.";
-								server_.send_to(other_player->get_id(), reply2, strlen(reply2));
+								server_ptr_->send_to(other_player->get_id(), reply2, strlen(reply2));
 								games_.erase(games_.begin() + i);
 								break;
 							}
@@ -286,7 +285,7 @@ private:
 					other_player->in_game = true;
 					lock.unlock();
 					// let's creat a new game!
-					std::shared_ptr<game> new_game = std::make_shared<game>(&player_, other_player, &server_);
+					std::shared_ptr<game> new_game = std::make_shared<game>(&player_, other_player, &(*server_ptr_));
 					games_.push_back(new_game);
 					new_game->start();
 					printw("Starting a game between client %u and client %u.\n", other_player->get_id(), player_.get_id());
@@ -298,7 +297,7 @@ private:
 		}
 	}
 	
-	void handle_read(std::size_t sender, char* body, std::size_t length) {
+	void read_handler(std::size_t sender, char* body, std::size_t length) {
 		// a message that was sent by a client with id sender
 		// first let's find the player object
 		player* player_ptr = nullptr;
@@ -341,8 +340,8 @@ private:
 			ss << "#msg " << player_num << " " << body+5;
 			const std::string& tmp = ss.str();
 			const char* reply = tmp.c_str();
-			server_.send_to(other_player_ptr->get_id(), reply, tmp.length());
-			server_.send_to(sender, reply, tmp.length());
+			server_ptr_->send_to(other_player_ptr->get_id(), reply, tmp.length());
+			server_ptr_->send_to(sender, reply, tmp.length());
 		} else if (isdigit(body[0])) {
 			// player submitting a move for their game
 			// let's check to make sure that it's their turn
@@ -350,7 +349,7 @@ private:
 			if (player_num != game_ptr->get_turn()) {
 				printw("Client %u attempted a move when it wasn't their turn.\n", sender);
 				char reply[] = "#msg s It is not your turn to make a move.";
-				server_.send_to(sender, reply, strlen(reply));
+				server_ptr_->send_to(sender, reply, strlen(reply));
 				refresh();
 				return;
 			} else {
@@ -359,7 +358,7 @@ private:
 					// move out of bounds
 					printw("Client %u has attempted a move that is out of bounds.\n", sender);
 					char reply[] = "#msg s The move you have chosen is out of bounds.\n";
-					server_.send_to(sender, reply, strlen(reply));
+					server_ptr_->send_to(sender, reply, strlen(reply));
 					refresh();
 					return;
 				}
@@ -369,7 +368,7 @@ private:
 					// no room left in that column
 					printw("Client %u has attempted a move on a full column.\n", sender);
 					char reply[] = "#msg s The column you have chosen is already full.\n";
-					server_.send_to(sender, reply, strlen(reply));
+					server_ptr_->send_to(sender, reply, strlen(reply));
 					refresh();
 					return;
 				}
@@ -410,8 +409,8 @@ private:
 						
 						const std::string& tmp = ss.str();
 						const char* reply = tmp.c_str();
-						server_.send_to(sender, reply, tmp.length());
-						server_.send_to(other_player_ptr->get_id(), reply, tmp.length());
+						server_ptr_->send_to(sender, reply, tmp.length());
+						server_ptr_->send_to(other_player_ptr->get_id(), reply, tmp.length());
 						
 						printw("Client %u move processed.\n", sender);
 						
@@ -423,7 +422,6 @@ private:
 		}
 	}
 
-	net_server server_;
 	std::vector<std::shared_ptr<game>> games_;
 	std::list<player> players_;
 	std::mutex players_mutex_;
@@ -433,9 +431,8 @@ int main() {
 	try {
 		initscr();
 		scrollok(stdscr, TRUE);
-		boost::asio::io_context io_context;
-		connect4_server serv(io_context, 1234);
-		io_context.run();
+		connect4_server serv(1234);
+		serv.start();
 	} catch (std::exception& e) {
 		std::cerr << e.what() << std::endl;
 		endwin();

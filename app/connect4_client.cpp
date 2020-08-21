@@ -38,12 +38,11 @@ to use the #msg command.
 
 */
 
-class connect4_client {
+class connect4_client : public application_client {
 public:
-	connect4_client(boost::asio::io_context& io_context, std::size_t port) 
-	  : client_(io_context, port,
-	      std::bind(&connect4_client::handle_read, this, std::placeholders::_1, std::placeholders::_2)) {
-		max_body_length_ = client_.get_max_body_length() - 10;
+	connect4_client(std::string& ip, std::size_t port) 
+	  : application_client(ip, port) {
+		max_body_length_ = client_ptr_->get_max_body_length() - 10;
 		
 		std::size_t input_win_h = LINES / 8;
 		if (input_win_h < 3) input_win_h = 3;
@@ -67,7 +66,9 @@ public:
 	}
 	
 	void start() {
+		application_client::start();
 		write_loop();
+		io_thread_ptr_->join();
 	}
 	
 private:
@@ -80,13 +81,13 @@ private:
 			if (!strcmp(message, "#help")) {
 				print_help();
 			} else if (!strncmp(message, "#msg ", 5)) {
-				client_.send(message, strlen(message));
+				client_ptr_->send(message, strlen(message));
 			} else {
 				wprintw(chat_win, "Command \"%s\" not recognized.\n", message);
 				wrefresh(chat_win);
 			}
 		} else {
-			client_.send(message, strlen(message));
+			client_ptr_->send(message, strlen(message));
 		}
 		
 		write_loop();
@@ -135,7 +136,7 @@ private:
 		wrefresh(input_win);
 	}
 	
-	void handle_read(char* body, std::size_t length) {
+	void read_handler(char* body, std::size_t length) {
 		if (body[0] == '#') {
 			if (!strncmp(body, "#msg ", 5)) {
 				wattron(chat_win, A_BOLD);
@@ -285,7 +286,6 @@ private:
 	WINDOW *game_win;
 	WINDOW *chat_win;
 	WINDOW *input_win;
-	net_client client_;
 	std::size_t max_body_length_;
 };
 
@@ -296,14 +296,10 @@ int main() {
 		init_pair(1, COLOR_MAGENTA, COLOR_BLACK); // color for player 1
 		init_pair(2, COLOR_CYAN, COLOR_BLACK); // color for player 2
 		init_pair(3, COLOR_RED, COLOR_BLACK); // color for server
-		boost::asio::io_context io_context;
 		{
-			connect4_client client(io_context, 1234);
-			
-			std::thread io_thread([&io_context](){ io_context.run(); });
+			std::string ip("127.0.0.1");
+			connect4_client client(ip, 1234);
 			client.start();
-			
-			io_thread.join();
 		} // so that client destructor gets called when io_thread.join() returns
 		
 		endwin();
